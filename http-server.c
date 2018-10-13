@@ -28,6 +28,7 @@ struct Conf {
   	int keep_alive;
 };
 
+//Via Ctrl+C
 void signal_handler(int sig_num) {
     signal(SIGINT, signal_handler);
     printf("\nExiting httpserver. Bye. \n");
@@ -35,6 +36,10 @@ void signal_handler(int sig_num) {
     exit(0);
 }
 
+/******************
+	  This function populates the conf struct with
+	  the information about our server from the file ws.conf
+******************/
 void setup_conf(struct Conf* conf, int port) {
 	FILE *f = fopen("ws.conf", "r");
     if(f == NULL) {
@@ -67,11 +72,12 @@ void setup_conf(struct Conf* conf, int port) {
 			strtok(buf," ");
 			conf->keep_alive = atoi(strtok(NULL," "));
 		}        
-    }
-    
-    fclose(f);
+    }   
+    fclose(f);   
+}
 
-    
+void client_handler(int client, struct Conf *ws_conf) {
+
 }
 
 int main( int argc, char* argv[]) {
@@ -84,6 +90,7 @@ int main( int argc, char* argv[]) {
 	FILE *outfp;							// output file pointer
 	FILE *md5fp;							//md5 file pointer
 	int client_fd; 						// client file descriptor for the accepted socket
+	int pid;
   	
 	char checksum[100], cmd[100];
 
@@ -92,14 +99,14 @@ int main( int argc, char* argv[]) {
 		printf ("USAGE:  <port>\n");
 		exit(1);
 	}
-	struct Conf system_config_data;
-    setup_conf(&system_config_data, atoi(argv[1])); 
+	struct Conf ws_conf;
+    setup_conf(&ws_conf, atoi(argv[1])); 
 	// print information of server
     printf("\n********************************************************************************\n\n");
-    printf("Port Number: %d\n", system_config_data.port);
-    printf("Document Root: %s\n", system_config_data.document_root);
-    printf("Default Web Page: %s\n", system_config_data.default_web_page);
-    printf("Keep-Alive Timeout: %d\n", system_config_data.keep_alive);
+    printf("Port Number: %d\n", ws_conf.port);
+    printf("Document Root: %s\n", ws_conf.document_root);
+    printf("Default Web Page: %s\n", ws_conf.default_web_page);
+    printf("Keep-Alive Timeout: %d\n", ws_conf.keep_alive);
     printf("\n********************************************************************************\n\n");
 
 	/******************
@@ -141,6 +148,23 @@ int main( int argc, char* argv[]) {
             perror("Accept error");
             exit(1);
         }
+        pid = fork();
+	    if (pid < 0) {
+	      perror("ERROR on fork");
+	      exit(1);
+	    }
+	    //Return to parent
+	    if (pid > 0) {
+	      close(client_fd);
+	      waitpid(0, NULL, WNOHANG);
+	    }
+	    //The child process will handle individual clients, so we can  close the main socket
+	    if (pid == 0) {
+	      close(sock);
+	      // start child process
+	      client_handler(client_fd, &ws_conf);
+	      exit(0);
+	    }
 
     }
 }
