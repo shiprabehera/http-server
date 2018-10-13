@@ -19,6 +19,14 @@
 #define MAXBUFSIZE 1000
 #define FILE_TYPES 9
 
+#define OK 200
+#define INVALID_METHOD 4001
+#define INVALID_VERSION 4002
+#define INVALID_URL 4003
+#define NOT_FOUND 404
+#define INT_SERVER_ERROR 500
+#define NOT_IMPLEMENTED 501
+
 struct Conf {
 	int port;
   	char document_root[MAXBUFSIZE];
@@ -26,6 +34,12 @@ struct Conf {
   	char extensions[FILE_TYPES][MAXBUFSIZE];
   	char encodings [FILE_TYPES][MAXBUFSIZE];
   	int keep_alive;
+};
+
+struct HTTPHeader {
+    char *method;
+    char *URI;
+    char *httpversion;
 };
 
 //Via Ctrl+C
@@ -36,10 +50,10 @@ void signal_handler(int sig_num) {
     exit(0);
 }
 
-/******************
+/***********************************************************
 	  This function populates the conf struct with
 	  the information about our server from the file ws.conf
-******************/
+************************************************************/
 void setup_conf(struct Conf* conf, int port) {
 	FILE *f = fopen("ws.conf", "r");
     if(f == NULL) {
@@ -76,7 +90,49 @@ void setup_conf(struct Conf* conf, int port) {
     fclose(f);   
 }
 
+void get_request_params(char *req, struct HTTPHeader *header) {
+  char *saveptr, *token;
+  /* saveptr is a pointer to a char * 
+	variable that is used internally by strtok_r() in 
+	order to maintain context between successive calls
+	that parse the same string */
+  token = strtok_r(req, "\n", &saveptr);
+
+  token = strtok_r(token, " ", &saveptr);
+  header->method = malloc(sizeof(char) * (strlen(token) + 1));
+  strcpy(header->method, token);
+
+  token = strtok_r(NULL, " ", &saveptr);
+  header->URI = malloc(sizeof(char) * (strlen(token) + 1));
+  strcpy(header->URI, token);
+
+  header->httpversion = malloc(sizeof(char) * (strlen(saveptr) + 1));
+  strcpy(header->httpversion, saveptr);
+
+}
+
 void client_handler(int client, struct Conf *ws_conf) {
+	char request[MAXBUFSIZE];
+	char header[MAXBUFSIZE];
+	struct HTTPHeader request_headers;
+  	int status_code;
+  	char res_data[MAXBUFSIZE], absolute_file_path[MAXBUFSIZE];
+	// store the request body in request
+    int nbytes = recv(client, request, MAXBUFSIZE, 0);
+  	if (nbytes < 0) {
+    	perror("Error while receiving request: ");
+    	char internal_server_error[] = "HTTP/1.1 500 Internal Server Error";
+        write (client, internal_server_error,strlen(internal_server_error));
+		write(client,"\n\n", strlen("\n\n"));
+    	exit(-1);
+  	} else {
+  		get_request_params((char *)&request, &request_headers);
+  		printf("\n************************** REQUEST *********************************************\n\n");
+		printf("Request Method: %s\n", request_headers.method);
+		printf("Request URL: %s\n", request_headers.URI);
+		printf("HTTP Version: %s\n", request_headers.httpversion);
+		printf("\n********************************************************************************\n\n");
+  	}        
 
 }
 
@@ -156,7 +212,7 @@ int main( int argc, char* argv[]) {
 	    //Return to parent
 	    if (pid > 0) {
 	      close(client_fd);
-	      waitpid(0, NULL, WNOHANG);
+	      waitpid(0, NULL, WNOHANG); //indicates that the parent process shouldn’t wait
 	    }
 	    //The child process will handle individual clients, so we can  close the main socket
 	    if (pid == 0) {
