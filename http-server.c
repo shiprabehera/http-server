@@ -13,11 +13,12 @@
 #include <memory.h>
 #include <string.h>
 #include <dirent.h>
-#include<ctype.h>
+#include <ctype.h>
 
 #define MAXCLIENTS 1000
 #define MAXBUFSIZE 1000
 #define FILE_TYPES 9
+#define MAXEXTLEN 5
 
 #define OK 200
 #define INVALID_METHOD 4001
@@ -42,12 +43,26 @@ struct HTTPHeader {
     char *httpversion;
 };
 
+struct HTTPResponse {
+    char *path;
+    char body[MAXBUFSIZE * MAXBUFSIZE];
+    int status_code;
+};
+
 //Via Ctrl+C
 void signal_handler(int sig_num) {
     signal(SIGINT, signal_handler);
     printf("\nExiting httpserver. Bye. \n");
     fflush(stdout);
     exit(0);
+}
+
+/* function to trim the trailing space */
+char * trim(char *c) {
+    char * e = c + strlen(c) - 1;
+    while(*c && isspace(*c)) c++;
+    while(e > c && isspace(*e)) *e-- = '\0';
+    return e;
 }
 
 /***********************************************************
@@ -76,6 +91,7 @@ void setup_conf(struct Conf* conf, int port) {
         	strtok(buf," ");
         	str2 = strtok(NULL," ");
         	strcpy(conf->document_root, str2);
+        	strtok(conf->document_root, "\n");
         }
         else if(strcmp(str1,"DirectoryIndex") == 0) {
         	strtok(buf," ");
@@ -90,7 +106,7 @@ void setup_conf(struct Conf* conf, int port) {
     fclose(f);   
 }
 
-void get_request_params(char *req, struct HTTPHeader *header) {
+void get_request_headers(char *req, struct HTTPHeader *header) {
   char *saveptr, *token;
   /* saveptr is a pointer to a char * 
 	variable that is used internally by strtok_r() in 
@@ -103,18 +119,117 @@ void get_request_params(char *req, struct HTTPHeader *header) {
   strcpy(header->method, token);
 
   token = strtok_r(NULL, " ", &saveptr);
-  header->URI = malloc(sizeof(char) * (strlen(token) + 1));
+  //header->URI = malloc(sizeof(char) * (strlen(token) + 1));
+  header->URI = malloc(strlen(token)+1);
   strcpy(header->URI, token);
 
   header->httpversion = malloc(sizeof(char) * (strlen(saveptr) + 1));
   strcpy(header->httpversion, saveptr);
+  header->httpversion[strlen(header->httpversion) - 1] = '\0';
 
 }
 
+void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_request, struct HTTPResponse *http_response) {
+    
+    if(strncmp(http_request->httpversion,"HTTP/1.1", 8) != 0) {
+    	printf("%lu\n", strlen(http_request->httpversion));
+    	printf("%lu\n", strlen("HTTP/1.1"));
+    	printf("Invalid Version: HTTP/1.1\n");
+        printf("Invalid Version: %s\n", http_request->httpversion);
+        strcpy(http_response->path, "NO PATH");
+        http_response->status_code = 4002;
+        return;
+    } // to check bad http versions
+    else if(strstr(http_request->URI, "{") != NULL || strstr(http_request->URI, "}") != NULL || strstr(http_request->URI, "|") != NULL ||
+            strstr(http_request->URI, "\\") != NULL ||strstr(http_request->URI, "^") != NULL || strstr(http_request->URI, "~") != NULL ||
+            strstr(http_request->URI, "[") != NULL || strstr(http_request->URI, "]") != NULL || strstr(http_request->URI, "`") != NULL ||
+            strstr(http_request->URI, "%") != NULL || strstr(http_request->URI, "\"") != NULL || strstr(http_request->URI, "<") != NULL ||
+            strstr(http_request->URI, ">") != NULL) {
+        printf("Invalid URL: %s\n", http_request->URI);
+        strcpy(http_response->path, "NO PATH");
+        http_response->status_code = 4003;
+        return;
+    } 
+    
+    char *path = http_request->URI;
+    int i = 0;
+    
+    // create full path
+    
+    char full_path[(sizeof(char) * (strlen(conf_struct->document_root) + strlen(http_request->URI)))];
+    memset(full_path, 0, sizeof(full_path));
+    
+    strcat(full_path, conf_struct->document_root);
+    strcat(full_path, http_request->URI);
+    printf("File path requested !!!! %s\n", full_path);
+    // check if path requested is root: '/', 'index.html'
+    printf("uri is %lu\n", strlen(http_request->URI));
+    printf("uri is %s\n", http_request->URI);
+
+    if (strcmp(http_request->URI, "/") == 0) {
+    	printf("here!!!!!!!");
+        strcat(full_path, "index.html");
+        http_response->status_code = 200;
+        http_response->path = malloc(strlen(full_path)+1);
+        strcpy(http_response->path, full_path);
+        return;
+    }
+
+    else if(strcmp(http_request->URI, "/index.html") == 0) {
+    	printf("here!!!!");
+        http_response->status_code = 200;
+        http_response->path = malloc(strlen(full_path)+1);
+  		//strcpy(header->URI, token);
+        strcpy(http_response->path, full_path);
+        return;
+    }
+    
+}
+
+void get_file(int client, struct HTTPResponse *http_response) {
+    
+    char buffer[MAXBUFSIZE];
+    long file_size;
+    FILE *f;
+    int nbytes;
+    int i;
+    
+    char *ext = malloc(sizeof(char) * MAXEXTLEN);
+    
+    for(int i = strlen(http_response->path)-1; i >= 0; i--) {
+        if(http_response->path[i] == '.') {
+            strcpy(ext, &http_response->path[i]);
+            break;
+        }
+    }
+    
+    char html_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+    
+    
+    printf("PATH IS ----- %s \n", http_response->path);
+    printf("extension IS ----- %s \n", ext);
+    f = fopen(http_response->path, "r");
+    
+    
+    if ((strcmp(ext, ".html")) == 0 || strcmp(ext, ".htm") == 0) {
+        printf("html !!");
+        strcpy(http_response->body, html_response);
+    }
+
+    send(client, http_response->body, strlen(http_response->body), 0);
+    while (!feof(f)) {
+        nbytes = fread(buffer, 1, MAXBUFSIZE, f);
+        send(client, buffer, nbytes, 0);
+        printf("sending html body \n");
+    }
+    fclose(f);
+}
+
 void client_handler(int client, struct Conf *ws_conf) {
-	char request[MAXBUFSIZE];
+    char request[MAXBUFSIZE];
 	char header[MAXBUFSIZE];
 	struct HTTPHeader request_headers;
+	struct HTTPResponse http_response;
   	int status_code;
   	char res_data[MAXBUFSIZE], absolute_file_path[MAXBUFSIZE];
 	// store the request body in request
@@ -126,12 +241,25 @@ void client_handler(int client, struct Conf *ws_conf) {
 		write(client,"\n\n", strlen("\n\n"));
     	exit(-1);
   	} else {
-  		get_request_params((char *)&request, &request_headers);
-  		printf("\n************************** REQUEST *********************************************\n\n");
+  		get_request_headers((char *)&request, &request_headers);
+        printf("\n************************** REQUEST *********************************************\n\n");
 		printf("Request Method: %s\n", request_headers.method);
 		printf("Request URL: %s\n", request_headers.URI);
 		printf("HTTP Version: %s\n", request_headers.httpversion);
 		printf("\n********************************************************************************\n\n");
+
+	    if(strcmp(request_headers.method, "GET") == 0) {
+	    	printf("\n***Calling getstatuscode***\n\n");
+	    	get_response_format(ws_conf, &request_headers, &http_response);
+	        printf("\n***Response***\n\n");
+	        printf("Status: %d\n", http_response.status_code);
+	        printf("Full Path: %s\n\n", http_response.path);
+	        
+	        if(http_response.status_code == OK) {
+	            printf("here");
+	            get_file(client, &http_response);
+	        }
+	    }
   	}        
 
 }
@@ -218,6 +346,7 @@ int main( int argc, char* argv[]) {
 	    if (pid == 0) {
 	      close(sock);
 	      // start child process
+	      printf("\n***calling client handler!!!!! ***\n\n");
 	      client_handler(client_fd, &ws_conf);
 	      exit(0);
 	    }
