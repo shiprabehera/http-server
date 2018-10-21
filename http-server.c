@@ -79,31 +79,41 @@ void setup_conf(struct Conf* conf, int port) {
     char buffer[MAXBUFSIZE];
     char tbuf[MAXBUFSIZE];
     char *temp;
-    
+    int index = 0;
     while(fgets(buffer, MAXBUFSIZE, f)) {
     	char *str1, *str2, *str3, buf[MAXBUFSIZE];
 		strcpy(buf,buffer);
         str1 = strtok(buffer," ");
+        printf("str 1 is -------> %s\n", str1);
         if(strcmp(str1,"Listen") == 0) {
+        	printf("found listen!!!!\n");
         	conf->port = port;
-        }
-        else if(strcmp(str1,"DocumentRoot") == 0) {
+        } else if(strcmp(str1, "DocumentRoot") == 0) {
+        	printf("found document root!!!!\n");
         	strtok(buf," ");
         	str2 = strtok(NULL," ");
         	strcpy(conf->document_root, str2);
         	strtok(conf->document_root, "\n");
-        }
-        else if(strcmp(str1,"DirectoryIndex") == 0) {
+        } else if(strcmp(str1, "DirectoryIndex") == 0) {
+        	printf("found dir index !!!!\n");
         	strtok(buf," ");
         	str2 = strtok(NULL," ");
         	strcpy(conf->default_web_page, str2);
-        }
-		else if(strcmp(str1,"Keep-Alive") == 0) {
+        } else if(strcmp(str1, ".html") == 0 || strcmp(str1, ".htm") == 0 || strcmp(str1, ".txt") == 0 ||
+        	strcmp(str1, ".png") == 0 || strcmp(str1, ".gif") == 0 || strcmp(str1, ".jpg") == 0 ||
+        	strcmp(str1, ".css") == 0 || strcmp(str1, ".js") == 0 || strcmp(str1, ".ico") == 0 ) {
+			printf("content type!!!!\n");
+			//strtok(buf," ");
+        	//str2 = strtok(NULL," ");
+			strcpy(conf->extensions[index], str1);
+			index++;
+        } else if(strcmp(str1,"Keep-Alive") == 0) {
 			strtok(buf," ");
 			conf->keep_alive = atoi(strtok(NULL," "));
 		}        
     }   
-    fclose(f);   
+    fclose(f);  
+    printf("Extension!!! %s\n", conf->extensions[0]);
 }
 
 void get_request_headers(char *req, struct HTTPHeader *header) {
@@ -162,12 +172,11 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
     strcat(full_path, conf_struct->document_root);
     strcat(full_path, http_request->URI);
     printf("File path requested !!!! %s\n", full_path);
-    // check if path requested is root: '/', 'index.html'
+    
     printf("uri is %lu\n", strlen(http_request->URI));
     printf("uri is %s\n", http_request->URI);
 
     if (strcmp(http_request->URI, "/") == 0) {
-    	printf("here!!!!!!!");
         strcat(full_path, "index.html");
         http_response->status_code = 200;
         http_response->path = malloc(strlen(full_path)+1);
@@ -176,10 +185,60 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
     }
 
     else if(strcmp(http_request->URI, "/index.html") == 0) {
-    	printf("here!!!!");
         http_response->status_code = 200;
         http_response->path = malloc(strlen(full_path)+1);
-  		//strcpy(header->URI, token);
+        strcpy(http_response->path, full_path);
+        return;
+    }
+
+    if(strstr(http_request->URI, ".") == NULL) {
+        http_response->status_code = 404;
+        strcpy(http_response->path, full_path);
+        return;
+    }
+    i = 0;
+    char *ext = malloc(sizeof(char) * MAXEXTLEN);
+    
+    for(i = strlen(http_request->URI)-1; i >= 0; i--) {
+        if(http_request->URI[i] == '.') {
+            strcpy(ext, &http_request->URI[i]);
+            break;
+        }
+    }
+    int ext_flag = 1;
+    
+    for(i = 0; i < FILE_TYPES; i++) {
+        if(strcmp(ext, conf_struct->extensions[i]) == 0) {
+            ext_flag = 0;
+        }
+    }
+    
+    if(ext_flag == 1) {
+        http_response->status_code = 501;
+        strcpy(http_response->path, full_path);
+        return;
+    }
+    
+    FILE *f = fopen(full_path, "rb");
+    
+    int rval = access(full_path, F_OK);
+    if(f != NULL) {
+    	http_response->status_code = OK;
+        http_response->path = malloc(strlen(full_path)+1);
+        strcpy(http_response->path, full_path);
+        fclose(f);
+        return;
+    }
+    else {
+    	
+    	if(errno == EACCES) { // check file access
+        	http_response->status_code = 500;
+            http_response->path = malloc(strlen(full_path)+1);
+            strcpy(http_response->path, full_path);
+            return;
+        }
+        http_response->status_code = 404;
+        http_response->path = malloc(strlen(full_path)+1);
         strcpy(http_response->path, full_path);
         return;
     }
@@ -203,24 +262,50 @@ void get_file(int client, struct HTTPResponse *http_response) {
         }
     }
     
+    char png_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/png; charset=UTF-8\r\n\r\n";
+    char gif_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/gif; charset=UTF-8\r\n\r\n";
     char html_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/html; charset=UTF-8\r\n\r\n";
+    char text_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/plain; charset=UTF-8\r\n\r\n";
+    char css_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/css; charset=UTF-8\r\n\r\n";
+    char jpg_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/jpeg; charset=UTF-8\r\n\r\n";
+    char js_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: text/javascript; charset=UTF-8\r\n\r\n";
+    char ico_response[] = "HTTP/1.1 200 OK:\r\n" "Content-Type: image/x-icon; charset=UTF-8\r\n\r\n";
     
     
-    printf("PATH IS ----- %s \n", http_response->path);
-    printf("extension IS ----- %s \n", ext);
-    f = fopen(http_response->path, "r");
+    f = fopen(http_response->path, "rb");
     
     
-    if ((strcmp(ext, ".html")) == 0 || strcmp(ext, ".htm") == 0) {
-        printf("html !!");
+	if ((strcmp(ext, ".png")) == 0) {
+        strcpy(http_response->body, png_response);
+    }
+    else if ((strcmp(ext, ".gif")) == 0) {
+        strcpy(http_response->body, gif_response);
+    }
+    else if ((strcmp(ext, ".html")) == 0 || strcmp(ext, ".htm") == 0) {
+        printf("html ");
         strcpy(http_response->body, html_response);
+    }
+    else if ((strcmp(ext, ".jpg")) == 0) {
+        strcpy(http_response->body, jpg_response);
+    }
+    else if ((strcmp(ext, ".txt")) == 0) {
+        strcpy(http_response->body, text_response);
+    }
+    else if ((strcmp(ext, ".css")) == 0) {
+        strcpy(http_response->body, css_response);
+    }
+    else if ((strcmp(ext, ".js")) == 0) {
+        strcpy(http_response->body, js_response);
+    }
+    else if ((strcmp(ext, ".ico")) == 0) {
+        strcpy(http_response->body, ico_response);
     }
 
     send(client, http_response->body, strlen(http_response->body), 0);
     while (!feof(f)) {
         nbytes = fread(buffer, 1, MAXBUFSIZE, f);
         send(client, buffer, nbytes, 0);
-        printf("sending html body \n");
+        //printf("FILE SIZE IS ############################################################ %d\n", nbytes);
     }
     fclose(f);
 }
@@ -256,9 +341,11 @@ void client_handler(int client, struct Conf *ws_conf) {
 	        printf("Full Path: %s\n\n", http_response.path);
 	        
 	        if(http_response.status_code == OK) {
-	            printf("here");
 	            get_file(client, &http_response);
-	        }
+	        } else {
+            	
+                //send(client, http_response.body, sizeof(http_response.body), 0);
+            }
 	    }
   	}        
 
