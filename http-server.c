@@ -134,11 +134,12 @@ void get_request_headers(char *req, struct HTTPHeader *header) {
 
 void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_request, struct HTTPResponse *http_response) {
     
-    if(strncmp(http_request->httpversion,"HTTP/1.1", 8) != 0) {
+    if(strncmp(http_request->httpversion,"HTTP/1.1", 8) != 0 && strncmp(http_request->httpversion,"HTTP/1.0", 8) != 0) {
     	printf("%lu\n", strlen(http_request->httpversion));
     	printf("%lu\n", strlen("HTTP/1.1"));
     	printf("Invalid Version: HTTP/1.1\n");
         printf("Invalid Version: %s\n", http_request->httpversion);
+        http_response->path = malloc(strlen("NO PATH")+1);
         strcpy(http_response->path, "NO PATH");
         http_response->status_code = 4002;
         return;
@@ -149,6 +150,7 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
             strstr(http_request->URI, "%") != NULL || strstr(http_request->URI, "\"") != NULL || strstr(http_request->URI, "<") != NULL ||
             strstr(http_request->URI, ">") != NULL) {
         printf("Invalid URL: %s\n", http_request->URI);
+    	http_response->path = malloc(strlen("NO PATH")+1);
         strcpy(http_response->path, "NO PATH");
         http_response->status_code = 4003;
         return;
@@ -238,8 +240,8 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
     
 }
 
-void get_file(int client, struct HTTPResponse *http_response) {
-    
+void get_file(int client, struct HTTPResponse *http_response, struct HTTPHeader *http_request) {
+    printf("############ 0");
     char buffer[MAXBUFSIZE];
     long file_size;
     FILE *f;
@@ -260,7 +262,9 @@ void get_file(int client, struct HTTPResponse *http_response) {
   	file_size = ftell(f);
   	fseek(f, 0, SEEK_SET);
     
-    char *ok_response = "HTTP/1.1 200 OK\r\n";
+    char ok_response[100];
+    strcpy(ok_response, http_request->httpversion);
+    strcat(ok_response, " 200 Document Follows\r\n");
     char content_length[1024];
     sprintf(content_length, "%ld", file_size);
 
@@ -293,13 +297,10 @@ void get_file(int client, struct HTTPResponse *http_response) {
     fclose(f);
 }
 
-void send_error_response(int client, struct HTTPResponse *http_response) {
-	long not_found = strlen("<!DOCTYPE html><html><title>404 Not Found</title>"
-                            "<pre><h1></h1></pre>"
-                            "<body>404 Not Found: </body></html>\r\n") + strlen(http_request->URL) + strlen(post_data);
-    
-
-	char *err_response = "HTTP/1.1 500 Internal Server Error\r\n";
+void send_error_response(int client, struct HTTPResponse *http_response, struct HTTPHeader *http_request) {
+	char err_response[100];
+    strcpy(err_response, http_request->httpversion);
+    strcat(err_response, " 500 Internal Server Error\r\n");
 	strcpy(http_response->body, err_response);
 	send(client, http_response->body, strlen(http_response->body), 0);
 }
@@ -333,11 +334,16 @@ void client_handler(int client, struct Conf *ws_conf) {
 	        printf("\n***Response***\n\n");
 	        printf("Status: %d\n", http_response.status_code);
 	        printf("Full Path: %s\n\n", http_response.path);
-	        
+	    
+
+	        char version[100];
+	        strcpy(version, request_headers.httpversion);
+
 	        if(http_response.status_code == OK) {
-	            get_file(client, &http_response);
+	            get_file(client, &http_response, &request_headers);
 	        } else {
-            	send_error_response(client, &http_response);
+	        	printf("\n***here !!***\n\n");
+            	send_error_response(client, &http_response, &request_headers);
                 //send(client, http_response.body, sizeof(http_response.body), 0);
             }
 	    }
