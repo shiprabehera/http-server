@@ -270,12 +270,10 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
         return;
     }	
     }
-
     
 }
 
 void get_file(int client, struct HTTPResponse *http_response, struct HTTPHeader *http_request) {
-    printf("############ 0");
     char buffer[MAXBUFSIZE];
     long file_size;
     FILE *f;
@@ -356,8 +354,12 @@ void get_file(int client, struct HTTPResponse *http_response, struct HTTPHeader 
 
 void send_error_response(int client, struct HTTPResponse *http_response, struct HTTPHeader *http_request) {
 	char err_response[100];
-    strcpy(err_response, http_request->httpversion);
-    strcat(err_response, " 500 Internal Server Error\r\n");
+	strcpy(err_response, http_request->httpversion);
+	if (http_response->status_code == 404) {
+		strcat(err_response, " 404 Not Found\r\n");
+	} else {
+		strcat(err_response, " 500 Internal Server Error\r\n");
+	}
 	strcpy(http_response->body, err_response);
 	send(client, http_response->body, strlen(http_response->body), 0);
 }
@@ -387,41 +389,20 @@ void client_handler(int client, struct Conf *ws_conf) {
 		printf("Post Data: %s\n", request_headers.postdata);
 		printf("\n********************************************************************************\n\n");
 
-	    if(strcmp(request_headers.method, "GET") == 0) {
-	    	printf("\n***Calling getstatuscode***\n\n");
-	    	get_response_format(ws_conf, &request_headers, &http_response);
-	        printf("\n***Response***\n\n");
-	        printf("Status: %d\n", http_response.status_code);
-	        printf("Full Path: %s\n\n", http_response.path);
-	    
+    	printf("\n***Calling getstatuscode***\n\n");
+    	get_response_format(ws_conf, &request_headers, &http_response);
+        printf("\n************************** RESPONSE *********************************************\n\n");
+        printf("Status: %d\n", http_response.status_code);
+        printf("Full Path: %s\n\n", http_response.path);
+    	printf("\n********************************************************************************\n\n");
 
-	        char version[100];
-	        strcpy(version, request_headers.httpversion);
+        char version[100];
+        strcpy(version, request_headers.httpversion);
 
-	        if(http_response.status_code == OK) {
-	            get_file(client, &http_response, &request_headers);
-	        } else {
-	        	printf("\n***here !!***\n\n");
-            	send_error_response(client, &http_response, &request_headers);
-                //send(client, http_response.body, sizeof(http_response.body), 0);
-            }
-	    } else if(strcmp(request_headers.method, "POST") == 0) {
-			get_response_format(ws_conf, &request_headers, &http_response);
-	        printf("\n***Response***\n\n");
-	        printf("Status: %d\n", http_response.status_code);
-	        printf("Full Path: %s\n\n", http_response.path);
-	    
-
-	        char version[100];
-	        strcpy(version, request_headers.httpversion);
-
-	        if(http_response.status_code == OK) {
-	            get_file(client, &http_response, &request_headers);
-	        } else {
-	        	printf("\n***here !!***\n\n");
-            	send_error_response(client, &http_response, &request_headers);
-                //send(client, http_response.body, sizeof(http_response.body), 0);
-            }
+        if(http_response.status_code == OK) {
+            get_file(client, &http_response, &request_headers);
+        } else {
+        	send_error_response(client, &http_response, &request_headers);
         }
   	}        
 
