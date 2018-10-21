@@ -41,6 +41,8 @@ struct HTTPHeader {
     char *method;
     char *URI;
     char *httpversion;
+    char *connection;
+    char *postdata;
 };
 
 struct HTTPResponse {
@@ -109,6 +111,7 @@ void setup_conf(struct Conf* conf, int port) {
     printf("Extension!!! %s\n", conf->extensions[0]);
 }
 
+
 void get_request_headers(char *req, struct HTTPHeader *header) {
   char *saveptr, *token;
   /* saveptr is a pointer to a char * 
@@ -116,19 +119,45 @@ void get_request_headers(char *req, struct HTTPHeader *header) {
 	order to maintain context between successive calls
 	that parse the same string */
   token = strtok_r(req, "\n", &saveptr);
+  
+  char *rem = saveptr;
 
   token = strtok_r(token, " ", &saveptr);
   header->method = malloc(sizeof(char) * (strlen(token) + 1));
   strcpy(header->method, token);
 
   token = strtok_r(NULL, " ", &saveptr);
-  //header->URI = malloc(sizeof(char) * (strlen(token) + 1));
   header->URI = malloc(strlen(token)+1);
   strcpy(header->URI, token);
 
   header->httpversion = malloc(sizeof(char) * (strlen(saveptr) + 1));
   strcpy(header->httpversion, saveptr);
   header->httpversion[strlen(header->httpversion) - 1] = '\0';
+
+  /*last minute ugly jugaad -- it will only work for this particualr format:
+  POST /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: Keep-alive\r\n\r\nPOSTDATA
+  fix this mess! */
+
+  char *r1;
+  r1 = strtok_r(rem, "\n", &rem);
+  r1 = strtok_r(rem, "\n", &rem);
+  token = strtok_r(NULL, " ", &r1);
+  token = strtok_r(NULL, " ", &r1);
+
+  
+  header->connection = malloc(sizeof(char) * (strlen(token) + 1));
+  strcpy(header->connection, token);
+  header->connection[strlen(header->connection) - 1] = '\0';
+
+  if (strcmp(header->method, "POST") == 0) {
+	  char *r2;
+	  r2 = strtok_r(rem, "\n", &rem);
+	  //printf("Postdata is  %s\n", rem);
+	  //r2 = strtok_r(rem, "\n", &rem);
+	  header->postdata = malloc(sizeof(char) * (strlen(rem) + 1));
+	  strcpy(header->postdata, rem);
+	  //printf("Postdata is  %s\n", header->postdata);
+  }  
 
 }
 
@@ -188,6 +217,7 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
 
     if(strstr(http_request->URI, ".") == NULL) {
         http_response->status_code = 404;
+        http_response->path = malloc(strlen(full_path)+1);
         strcpy(http_response->path, full_path);
         return;
     }
@@ -202,7 +232,9 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
     }
     int ext_flag = 1;
     
-    for(i = 0; i < FILE_TYPES; i++) {
+    //GET supports all extensions but POST only supports .html
+    if ((strcmp(ext, ".html") == 0 && strcmp(http_request->method, "POST") == 0) || strcmp(http_request->method, "GET") == 0) {
+    	    for(i = 0; i < FILE_TYPES; i++) {
         if(strcmp(ext, conf_struct->extensions[i]) == 0) {
             ext_flag = 0;
         }
@@ -236,7 +268,9 @@ void get_response_format(struct Conf *conf_struct, struct HTTPHeader *http_reque
         http_response->path = malloc(strlen(full_path)+1);
         strcpy(http_response->path, full_path);
         return;
+    }	
     }
+
     
 }
 
@@ -268,33 +302,56 @@ void get_file(int client, struct HTTPResponse *http_response, struct HTTPHeader 
     char content_length[1024];
     sprintf(content_length, "%ld", file_size);
 
+
     strcpy(http_response->body, ok_response);
-	if ((strcmp(ext, ".png")) == 0) {
+    //POST will only respond to .html for now
+    if (strcmp(http_request->method, "POST") == 0) {
+    	strcat(http_response->body, "Content-Type: text/html\r\nContent-Length: ");
+    	char post_data_tags[1024];
+	    strcpy(post_data_tags, "<html><body><pre><h1>");
+	    strcat(post_data_tags, http_request->postdata);
+	    strcat(post_data_tags, "</h1></pre>\n");
+
+	    strcat(http_response->body, content_length);
+	    strcat(http_response->body, "\r\n\r\n");
+	    send(client, http_response->body, strlen(http_response->body), 0);
+
+	    send(client, post_data_tags, strlen(post_data_tags)-1, 0);
+	    while (!feof(f)) {
+	        nbytes = fread(buffer, 1, MAXBUFSIZE, f);
+	        send(client, buffer, nbytes, 0);
+	    }
+	    fclose(f);
+
+    } else {
+    	if ((strcmp(ext, ".png")) == 0) {
         strcat(http_response->body, "Content-Type: image/png\r\nContent-Length: ");
-    } else if ((strcmp(ext, ".gif")) == 0) {
-        strcat(http_response->body, "Content-Type: image/gif\r\nContent-Length: ");
-    } else if ((strcmp(ext, ".html")) == 0 || strcmp(ext, ".htm") == 0) {
-        strcat(http_response->body, "Content-Type: text/html\r\nContent-Length: ");
-    } else if ((strcmp(ext, ".jpg")) == 0) {
-        strcat(http_response->body, "Content-Type: image/jpeg\r\nContent-Length: ");
-    } else if ((strcmp(ext, ".txt")) == 0) {
-        strcat(http_response->body, "Content-Type: text/plain\r\nContent-Length: ");
-    } else if ((strcmp(ext, ".css")) == 0) {
-        strcat(http_response->body, "Content-Type: text/css\r\nContent-Length: ");
-    } else if ((strcmp(ext, ".js")) == 0) {
-        strcat(http_response->body, "Content-Type: text/javascript\r\nContent-Length: ");
-    } else if ((strcmp(ext, ".ico")) == 0) {
-        strcat(http_response->body, "Content-Type: image/x-icon\r\nContent-Length: ");
+	    } else if ((strcmp(ext, ".gif")) == 0) {
+	        strcat(http_response->body, "Content-Type: image/gif\r\nContent-Length: ");
+	    } else if ((strcmp(ext, ".html")) == 0 || strcmp(ext, ".htm") == 0) {
+	        strcat(http_response->body, "Content-Type: text/html\r\nContent-Length: ");
+	    } else if ((strcmp(ext, ".jpg")) == 0) {
+	        strcat(http_response->body, "Content-Type: image/jpeg\r\nContent-Length: ");
+	    } else if ((strcmp(ext, ".txt")) == 0) {
+	        strcat(http_response->body, "Content-Type: text/plain\r\nContent-Length: ");
+	    } else if ((strcmp(ext, ".css")) == 0) {
+	        strcat(http_response->body, "Content-Type: text/css\r\nContent-Length: ");
+	    } else if ((strcmp(ext, ".js")) == 0) {
+	        strcat(http_response->body, "Content-Type: text/javascript\r\nContent-Length: ");
+	    } else if ((strcmp(ext, ".ico")) == 0) {
+	        strcat(http_response->body, "Content-Type: image/x-icon\r\nContent-Length: ");
+	    }
+	    strcat(http_response->body, content_length);
+	    strcat(http_response->body, "\r\n\r\n");
+	    send(client, http_response->body, strlen(http_response->body), 0);
+	    while (!feof(f)) {
+	        nbytes = fread(buffer, 1, MAXBUFSIZE, f);
+	        send(client, buffer, nbytes, 0);
+	    }
+	    fclose(f);
     }
     
-    strcat(http_response->body, content_length);
-    strcat(http_response->body, "\r\n\r\n");
-    send(client, http_response->body, strlen(http_response->body), 0);
-    while (!feof(f)) {
-        nbytes = fread(buffer, 1, MAXBUFSIZE, f);
-        send(client, buffer, nbytes, 0);
-    }
-    fclose(f);
+    
 }
 
 void send_error_response(int client, struct HTTPResponse *http_response, struct HTTPHeader *http_request) {
@@ -326,6 +383,8 @@ void client_handler(int client, struct Conf *ws_conf) {
 		printf("Request Method: %s\n", request_headers.method);
 		printf("Request URL: %s\n", request_headers.URI);
 		printf("HTTP Version: %s\n", request_headers.httpversion);
+		printf("Connection: %s\n", request_headers.connection);
+		printf("Post Data: %s\n", request_headers.postdata);
 		printf("\n********************************************************************************\n\n");
 
 	    if(strcmp(request_headers.method, "GET") == 0) {
@@ -346,7 +405,24 @@ void client_handler(int client, struct Conf *ws_conf) {
             	send_error_response(client, &http_response, &request_headers);
                 //send(client, http_response.body, sizeof(http_response.body), 0);
             }
-	    }
+	    } else if(strcmp(request_headers.method, "POST") == 0) {
+			get_response_format(ws_conf, &request_headers, &http_response);
+	        printf("\n***Response***\n\n");
+	        printf("Status: %d\n", http_response.status_code);
+	        printf("Full Path: %s\n\n", http_response.path);
+	    
+
+	        char version[100];
+	        strcpy(version, request_headers.httpversion);
+
+	        if(http_response.status_code == OK) {
+	            get_file(client, &http_response, &request_headers);
+	        } else {
+	        	printf("\n***here !!***\n\n");
+            	send_error_response(client, &http_response, &request_headers);
+                //send(client, http_response.body, sizeof(http_response.body), 0);
+            }
+        }
   	}        
 
 }
