@@ -313,6 +313,11 @@ void get_file(int client, struct HTTPResponse *http_response, struct HTTPHeader 
 	    strcat(post_data_tags, "</h1></pre>\n");
 
 	    strcat(http_response->body, content_length);
+	    if (strstr(http_request->connection, "Keep-alive") != NULL) {
+	    	strcat(http_response->body, "\r\nConnection: Keep-alive");
+	    } else {
+	    	strcat(http_response->body, "\r\nConnection: Close");
+	    }
 	    strcat(http_response->body, "\r\n\r\n");
 	    send(client, http_response->body, strlen(http_response->body), 0);
 
@@ -342,6 +347,11 @@ void get_file(int client, struct HTTPResponse *http_response, struct HTTPHeader 
 	        strcat(http_response->body, "Content-Type: image/x-icon\r\nContent-Length: ");
 	    }
 	    strcat(http_response->body, content_length);
+	    if (strstr(http_request->connection, "Keep-alive") != NULL) {
+	    	strcat(http_response->body, "\r\nConnection: Keep-alive");
+	    } else {
+	    	strcat(http_response->body, "\r\nConnection: Close");
+	    }
 	    strcat(http_response->body, "\r\n\r\n");
 	    send(client, http_response->body, strlen(http_response->body), 0);
 	    while (!feof(f)) {
@@ -436,7 +446,9 @@ int client_handler(int client, struct Conf *ws_conf) {
 					client_handler(client, ws_conf);
 				}		
 			}
-		}	
+		} else {
+
+		}
 	}        
   	return 0;
 }
