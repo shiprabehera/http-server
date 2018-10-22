@@ -27,7 +27,8 @@
 #define NOT_FOUND 404
 #define INT_SERVER_ERROR 500
 #define NOT_IMPLEMENTED 501
-
+#define KEEP_ALIVE_FLAG 1
+struct timeval tv;
 struct Conf {
 	int port;
   	char document_root[MAXBUFSIZE];
@@ -111,53 +112,54 @@ void setup_conf(struct Conf* conf, int port) {
     printf("Extension!!! %s\n", conf->extensions[0]);
 }
 
-
 void get_request_headers(char *req, struct HTTPHeader *header) {
-  char *saveptr, *token;
-  /* saveptr is a pointer to a char * 
-	variable that is used internally by strtok_r() in 
-	order to maintain context between successive calls
-	that parse the same string */
-  token = strtok_r(req, "\n", &saveptr);
-  
-  char *rem = saveptr;
+	char postDataBuffer[4000] = {0};
+	char pipelineBuffer[4000] = {0};
+	bzero(pipelineBuffer, sizeof(pipelineBuffer));
+	bzero(postDataBuffer, sizeof(postDataBuffer));
+	char *requestLine;
 
-  token = strtok_r(token, " ", &saveptr);
-  header->method = malloc(sizeof(char) * (strlen(token) + 1));
-  strcpy(header->method, token);
+	strncpy(postDataBuffer, req,strlen(req));
+	strncpy(pipelineBuffer, req,strlen(req));
+	requestLine = strtok (req, "\n");
+	header->method = malloc(sizeof(char) * (strlen(requestLine) + 1));
+	header->URI = malloc(sizeof(char) * (strlen(requestLine) + 1));
+	header->httpversion = malloc(sizeof(char) * (strlen(requestLine) + 1));
+	sscanf(requestLine, "%s %s %s", header->method,  header->URI,  header->httpversion);
+	
+	char *buff;
+	int count;
+	char received_string[MAXBUFSIZE];
+	buff = strtok (postDataBuffer, "\n");
+	while(buff != NULL) {	
+		if((strlen(buff) == 1)) {
+			count = 1;
+		}
+		buff = strtok (NULL, "\n");
+		if(count == 1) {
+			bzero(received_string,sizeof(received_string));
+			sprintf(received_string,"%s",buff);
+			count = 0;
+		}		
+	}
+	//store postdata if any
+	header->postdata = malloc(sizeof(char) * (strlen(received_string) + 1));
+  	strcpy(header->postdata, received_string);
 
-  token = strtok_r(NULL, " ", &saveptr);
-  header->URI = malloc(strlen(token)+1);
-  strcpy(header->URI, token);
 
-  header->httpversion = malloc(sizeof(char) * (strlen(saveptr) + 1));
-  strcpy(header->httpversion, saveptr);
-  header->httpversion[strlen(header->httpversion) - 1] = '\0';
-
-  /*last minute ugly jugaad -- it will only work for this particualr format:
-  POST /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: Keep-alive\r\n\r\nPOSTDATA
-  fix this mess! */
-
-  char *r1;
-  r1 = strtok_r(rem, "\n", &rem);
-  r1 = strtok_r(rem, "\n", &rem);
-  token = strtok_r(NULL, " ", &r1);
-  token = strtok_r(NULL, " ", &r1);
-
-  
-  header->connection = malloc(sizeof(char) * (strlen(token) + 1));
-  strcpy(header->connection, token);
-  header->connection[strlen(header->connection) - 1] = '\0';
-
-  if (strcmp(header->method, "POST") == 0) {
-	  char *r2;
-	  r2 = strtok_r(rem, "\n", &rem);
-	  //printf("Postdata is  %s\n", rem);
-	  //r2 = strtok_r(rem, "\n", &rem);
-	  header->postdata = malloc(sizeof(char) * (strlen(rem) + 1));
-	  strcpy(header->postdata, rem);
-	  //printf("Postdata is  %s\n", header->postdata);
-  }  
+	char *temp;
+	char pp[MAXBUFSIZE];
+	temp = strtok (pipelineBuffer, "\n");
+	while(temp != NULL) {	
+		if(strstr(temp, "Connection") != NULL) {
+			bzero(pp, sizeof(pp));
+			sprintf(pp,"%s", temp+12);
+		}
+		temp = strtok (NULL, "\n");			
+	}
+	//store connection config e.g keep-alive
+	header->connection = malloc(sizeof(char) * (strlen(pp) + 1));
+  	strcpy(header->connection, pp);
 
 }
 
@@ -364,7 +366,7 @@ void send_error_response(int client, struct HTTPResponse *http_response, struct 
 	send(client, http_response->body, strlen(http_response->body), 0);
 }
 
-void client_handler(int client, struct Conf *ws_conf) {
+int client_handler(int client, struct Conf *ws_conf) {
     char request[MAXBUFSIZE];
 	char header[MAXBUFSIZE];
 	struct HTTPHeader request_headers;
@@ -404,8 +406,39 @@ void client_handler(int client, struct Conf *ws_conf) {
         } else {
         	send_error_response(client, &http_response, &request_headers);
         }
-  	}        
+  	}
 
+  	if( KEEP_ALIVE_FLAG == 1) {	
+		if(strstr(request_headers.connection, "Keep-alive") != NULL) {
+			printf("Keep-alive valuse in secs is :%d\n", ws_conf->keep_alive);
+			fd_set fd;
+			FD_ZERO(&fd);
+			FD_SET(client, &fd);
+			int n = client+1;
+			tv.tv_sec = ws_conf->keep_alive;
+			tv.tv_usec = 0;
+
+			int rv = 0; 
+			printf("\n*****Timer Started*****\n");
+			rv = select(n, &fd, NULL, NULL, &tv); 
+			if(rv == -1) {
+				perror("Select error\n");
+				close(client);
+				return(0);
+			} else if(rv == 0) {
+				printf("\n***** Timeout exceeded ****\n");        
+				close(client);
+				return(0);
+			} else {   
+				printf("\n***** Within timeout *****\n");
+				if(FD_ISSET(client, &fd)) {
+					printf("\n*****Calling again within timeout *****\n");
+					client_handler(client, ws_conf);
+				}		
+			}
+		}	
+	}        
+  	return 0;
 }
 
 int main( int argc, char* argv[]) {
@@ -483,21 +516,26 @@ int main( int argc, char* argv[]) {
 	      exit(1);
 	    }
 	    //Return to parent
-	    if (pid > 0) {
+	    /*if (pid > 0) {
 	      close(client_fd);
 	      waitpid(0, NULL, WNOHANG); //indicates that the parent process shouldn’t wait
-	    }
+	    }*/
 	    //The child process will handle individual clients, so we can  close the main socket
 	    if (pid == 0) {
 	      close(sock);
 	      // start child process
 	      printf("\n***calling client handler!!!!! ***\n\n");
-	      client_handler(client_fd, &ws_conf);
+	      exit(client_handler(client_fd, &ws_conf));
 	      /*while(ws_conf.keep_alive) {
 		  	ws_conf.keep_alive --;
 		  }*/
-	      exit(0);
+	      //exit(0);
 	    }
+	    /* Close the connection */
+		if(close(client_fd)<0)
+		{
+			printf("Error closing socket\n");
+		}
 
     }
 }
