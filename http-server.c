@@ -21,9 +21,6 @@
 #define MAXEXTLEN 5
 
 #define OK 200
-#define INVALID_METHOD 4001
-#define INVALID_VERSION 4002
-#define INVALID_URL 4003
 #define NOT_FOUND 404
 #define INT_SERVER_ERROR 500
 #define NOT_IMPLEMENTED 501
@@ -135,10 +132,11 @@ void get_request_headers(char *req, struct HTTPHeader *header) {
 		if((strlen(buff) == 1)) {
 			count = 1;
 		}
+		//printf("post buf %s\n", buff);
 		buff = strtok (NULL, "\n");
 		if(count == 1) {
-			bzero(received_string,sizeof(received_string));
-			sprintf(received_string,"%s",buff);
+			bzero(received_string, sizeof(received_string));
+			sprintf(received_string, "%s", buff);
 			count = 0;
 		}		
 	}
