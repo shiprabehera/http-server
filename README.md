@@ -31,7 +31,7 @@ It contains the following files:
 
 	Usage: (echo -en "POST /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: Keep-alive\r\n\r\nPOSTDATA") | nc 127.0.0.1 <port_number>
 
-	Purpose: Hnadles POST requests for .html files. When the server receives a POST request, it handles the same way it handles GET, i.e returns the .html file with an added section header, <html><body><pre><h1>POSTDATA </h1></pre>... and so on.
+	Purpose: Handles POST requests for .html files. When the server receives a POST request, it handles the same way it handles GET, i.e returns the .html file with an added section header, <html><body><pre><h1>POSTDATA </h1></pre>... and so on.
 
 **PIPELINING:**
 
